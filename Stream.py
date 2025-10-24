@@ -135,69 +135,148 @@ elif choice == "Predict":
         data['No'] = 0.0
         input_df = pd.DataFrame([data] * sequence_length)
     #------------------------------------
-    if st.sidebar.button("🚀 Predict") and input_df is not None:
-        if (input_df['clamp_pressure'] < 6).any():
-            st.warning("⚠️ Warning: Clamping Pressure too low! Risk of faulty parts.")
+    
 
-        # 🧠 Reindex input_df to expected columns
-        for col in expected_columns:
-            if col not in input_df.columns:
-                input_df[col] = 0.0  # Add missing columns with default value
+if st.sidebar.button("🚀 Predict") and input_df is not None:
+    if (input_df['clamp_pressure'] < 6).any():
+        st.warning("⚠️ Warning: Clamping Pressure too low! Risk of faulty parts.")
 
-        # Drop any extra columns not in expected
-        input_df = input_df[expected_columns]
+    # 🧠 Reindex input_df to expected columns
+    for col in expected_columns:
+        if col not in input_df.columns:
+            input_df[col] = 0.0
 
-        # Scale input
-        scaled = scaler.transform(input_df)
+    input_df = input_df[expected_columns]
+    scaled = scaler.transform(input_df)
 
-        if scaled.shape[0] == 0:
-            st.error("⚠️ Error: No input data provided for prediction.")
-            st.stop()
+    if scaled.shape[0] == 0:
+        st.error("⚠️ Error: No input data provided for prediction.")
+        st.stop()
 
-        # Expected shape for model
-        reshaped = np.reshape(scaled, (1, scaled.shape[0], scaled.shape[1]))
-        st.write("✅ Reshaped input shape:", reshaped.shape)
+    reshaped = np.reshape(scaled, (1, scaled.shape[0], scaled.shape[1]))
+    st.write("✅ Reshaped input shape:", reshaped.shape)
 
-        # Prediction
-        tool_prob = tool_model.predict(reshaped, verbose=0)[0][0]
-        tool_class = int(tool_prob > 0.4)
-        tool_label = 'Worn' if tool_class else 'Unworn'
-        confidence = tool_prob * 100 if tool_class else (1 - tool_prob) * 100
-        
-        # 🔄 Dynamic conditions based on experiment data
-        if input_df['clamp_pressure'].mean() > 6 and input_df['feedrate'].mean() > 80:
-            machining = "Yes"
-        else:
-            machining = "No"
+    tool_prob = tool_model.predict(reshaped, verbose=0)[0][0]
+    tool_class = int(tool_prob > 0.4)
+    tool_label = 'Worn' if tool_class else 'Unworn'
+    confidence = tool_prob * 100 if tool_class else (1 - tool_prob) * 100
+
+    # Extract key values
+    avg_feed = input_df['feedrate'].mean()
+    avg_clamp = input_df['clamp_pressure'].mean()
+
+    # 🔧 Machining Finalized Logic
+    if avg_clamp > 3 and avg_feed > 5:
+        machining = "Yes"
+    else:
+        machining = "No"
+
+    # 🔍 Visual Inspection Logic
+    if tool_label == "Unworn" and avg_clamp > 3 and avg_feed > 5:
+        visual = "Passed"
+    elif tool_label == "Worn" and avg_feed >= 6 and avg_clamp >= 3:
+        visual = "Failed"
+    elif tool_label == "Worn" and (avg_feed < 5 or avg_clamp < 3):
+        visual = "Failed"
+    else:
         visual = "Failed"
 
-        st.subheader("📝 Prediction Results")
-        st.success(f"🔧 Tool Condition: {tool_label} ({confidence:.2f}%)")
-        st.info(f"🏭 Machining Finalized: {machining}")
+    st.subheader("📝 Prediction Results")
+    st.success(f"🔧 Tool Condition: {tool_label} ({confidence:.2f}%)")
+    st.info(f"🏭 Machining Finalized: {machining}")
+    if visual == "Passed":
+        st.success(f"🔍 Visual Inspection: {visual}")
+    else:
         st.warning(f"🔍 Visual Inspection: {visual}")
 
-        report = {
-            "Tool Condition": tool_label,
-            "Confidence": f"{confidence:.2f}%",
-            "Machining Finalized": machining,
-            "Visual Inspection": visual
-        }
-        st.download_button("⬇️ Download CSV", pd.DataFrame([report]).to_csv(index=False), file_name="report.csv")
+    report = {
+        "Tool Condition": tool_label,
+        "Confidence": f"{confidence:.2f}%",
+        "Machining Finalized": machining,
+        "Visual Inspection": visual
+    }
+    st.download_button("⬇️ Download CSV", pd.DataFrame([report]).to_csv(index=False), file_name="report.csv")
 
-        # PDF Export
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.set_fill_color(13, 78, 216)
-        pdf.set_text_color(255, 255, 255)            
-        pdf.cell(0, 12, " CNC Tool Wear Prediction Report ", ln=True, align='C', fill=True)
-        pdf.ln(10)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(0, 10, f"Tool Condition: {tool_label} ({confidence:.2f}%)", ln=True)
-        pdf.output("report.pdf")
+    # PDF Export
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.set_fill_color(13, 78, 216)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 12, " CNC Tool Wear Prediction Report ", ln=True, align='C', fill=True)
+    pdf.ln(10)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 10, f"Tool Condition: {tool_label} ({confidence:.2f}%)", ln=True)
+    pdf.cell(0, 10, f"Machining Finalized: {machining}", ln=True)
+    pdf.cell(0, 10, f"Visual Inspection: {visual}", ln=True)
+    pdf.output("report.pdf")
 
-        with open("report.pdf", "rb") as f:
-            st.download_button("⬇️ Download PDF Report", f.read(), file_name="tool_wear_report.pdf")
+    with open("report.pdf", "rb") as f:
+        st.download_button("⬇️ Download PDF Report", f.read(), file_name="tool_wear_report.pdf")
 
-    #---------------------------
+    # if st.sidebar.button("🚀 Predict") and input_df is not None:
+    #     if (input_df['clamp_pressure'] < 6).any():
+    #         st.warning("⚠️ Warning: Clamping Pressure too low! Risk of faulty parts.")
+
+    #     # 🧠 Reindex input_df to expected columns
+    #     for col in expected_columns:
+    #         if col not in input_df.columns:
+    #             input_df[col] = 0.0  # Add missing columns with default value
+
+    #     # Drop any extra columns not in expected
+    #     input_df = input_df[expected_columns]
+
+    #     # Scale input
+    #     scaled = scaler.transform(input_df)
+
+    #     if scaled.shape[0] == 0:
+    #         st.error("⚠️ Error: No input data provided for prediction.")
+    #         st.stop()
+
+    #     # Expected shape for model
+    #     reshaped = np.reshape(scaled, (1, scaled.shape[0], scaled.shape[1]))
+    #     st.write("✅ Reshaped input shape:", reshaped.shape)
+
+    #     # Prediction
+    #     tool_prob = tool_model.predict(reshaped, verbose=0)[0][0]
+    #     tool_class = int(tool_prob > 0.4)
+    #     tool_label = 'Worn' if tool_class else 'Unworn'
+    #     confidence = tool_prob * 100 if tool_class else (1 - tool_prob) * 100
+        
+    #     # 🔄 Dynamic conditions based on experiment data
+    #     if input_df['clamp_pressure'].mean() > 6 and input_df['feedrate'].mean() > 80:
+    #         machining = "Yes"
+    #     else:
+    #         machining = "No"
+    #     visual = "Failed"
+
+    #     st.subheader("📝 Prediction Results")
+    #     st.success(f"🔧 Tool Condition: {tool_label} ({confidence:.2f}%)")
+    #     st.info(f"🏭 Machining Finalized: {machining}")
+    #     st.warning(f"🔍 Visual Inspection: {visual}")
+
+    #     report = {
+    #         "Tool Condition": tool_label,
+    #         "Confidence": f"{confidence:.2f}%",
+    #         "Machining Finalized": machining,
+    #         "Visual Inspection": visual
+    #     }
+    #     st.download_button("⬇️ Download CSV", pd.DataFrame([report]).to_csv(index=False), file_name="report.csv")
+
+    #     # PDF Export
+    #     pdf = FPDF()
+    #     pdf.add_page()
+    #     pdf.set_font("Arial", size=12)
+    #     pdf.set_fill_color(13, 78, 216)
+    #     pdf.set_text_color(255, 255, 255)            
+    #     pdf.cell(0, 12, " CNC Tool Wear Prediction Report ", ln=True, align='C', fill=True)
+    #     pdf.ln(10)
+    #     pdf.set_text_color(0, 0, 0)
+    #     pdf.cell(0, 10, f"Tool Condition: {tool_label} ({confidence:.2f}%)", ln=True)
+    #     pdf.output("report.pdf")
+
+    #     with open("report.pdf", "rb") as f:
+    #         st.download_button("⬇️ Download PDF Report", f.read(), file_name="tool_wear_report.pdf")
+
+#     #---------------------------
     
